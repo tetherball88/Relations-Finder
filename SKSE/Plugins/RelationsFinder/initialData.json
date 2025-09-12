@@ -1,0 +1,6 @@
+{
+    "relationsFinderQst": "TT_RelationsFinder.esp|0xe89",
+    "relationsFinderFaction": "__formData|TT_RelationsFinder.esp|0xe8a",
+    "debugSpell": "__formData|TT_RelationsFinder.esp|0x2",
+    "playerRef": "__formData|Skyrim.esm|0x14"
+}

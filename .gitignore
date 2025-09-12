@@ -1,0 +1,6 @@
+.github
+.vscode
+meta.ini
+*.7z
+SkyrimSE.code-workspace
+*.ppj
