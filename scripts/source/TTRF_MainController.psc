@@ -12,6 +12,9 @@ EndEvent
 
 Function Maintenance()
     TTRF_Store.ImportInitialData()    
+
+    ; unit tests, disable for prod
+    TTRF_TestCases.Maintenance()
 EndFunction
 
 

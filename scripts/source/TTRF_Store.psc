@@ -7,7 +7,7 @@ import TTRF_JCDomain
     initialData: {
         "findPartnersQst": "TT_LoversLedger.esp|0xe89",
         "findPartnersFaction": "__formData|TT_LoversLedger.esp|0xe8a",
-    }    
+    }
     originalRelationships: { // map of all tracked npcs
         [Actor]: { // npc key
             [relationshipKey]: Actor | Actor[] 
@@ -43,14 +43,15 @@ EndFunction
 
 ; Clear the main tracking object
 Function Clear() global
-    JDB_solveObjSetter(GetNamespaceKey(), 0)
+    JDB_solveObjSetter(GetNamespaceKey(), JMap_object())
+    ImportInitialData()
 EndFunction
 
 ;/**
 * Exports the main NPCs JMap object to a file.
 */;
-Function ExportData() global
-    JValue_writeToFile(JDB_solveObj(GetNamespaceKey()), JContainers.userDirectory() + "RelationsFinder/store.json")
+Function ExportData(string fileName = "store.json") global
+    JValue_writeToFile(JDB_solveObj(GetNamespaceKey()), JContainers.userDirectory() + "RelationsFinder/"+fileName)
 EndFunction
 
 ;/**
@@ -66,11 +67,17 @@ string Function GetInitialDataKey() global
 EndFunction
 
 Function ImportInitialData() global
+    int JRoot = JDB_solveObj(GetNamespaceKey())
+    if(JRoot == 0)
+        JDB_solveObjSetter(GetNamespaceKey(), JMap_object())
+    endif
     JDB_solveObjSetter(GetInitialDataKey(), JValue_readFromFile("Data/SKSE/Plugins/RelationsFinder/initialData.json"), true)
 EndFunction
 
 int Function GetRoot() global
-    return JDB_solveObj(GetNamespaceKey())
+    int jRoot = JDB_solveObj(GetNamespaceKey())
+
+    return jRoot
 EndFunction
 
 Actor Function GetPlayerRef() global
@@ -117,7 +124,6 @@ int Function GetNpcRelationships(Actor npc) global
 
         JFormMap_setObj(JRelationships, npc, JNpcObj)
 
-        
         Quest findPartnersQst = GetRelationsFinderQST()
 
         ; find for npc any existing relationships it should be done once per new npc
@@ -126,13 +132,13 @@ int Function GetNpcRelationships(Actor npc) global
             findPartnersQst.Start()
         endif
 
-        int wait = 5
+        int wait = 10
         while(wait != 0 && findPartnersQst.IsRunning())
             Utility.Wait(0.3)
             wait = wait - 1
         endwhile
 
-        ; if after 2.5 seconds quest is still running then something went wrong and we need to terminate it so other npcs can be added
+         ; if after 3 seconds quest is still running then something went wrong and we need to terminate it so other npcs can be added
         if(findPartnersQst.IsRunning())
             npc.RemoveFromFaction(GetRelationsFinderFaction()) ; in case if quest script didn't handle removing Faction
             findPartnersQst.Stop()
