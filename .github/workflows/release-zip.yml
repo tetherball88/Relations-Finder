@@ -34,7 +34,7 @@ jobs:
 
           echo "::group::Planned contents"
           echo "Including:"
-          printf -- "  - %s\n" "docs/" "scripts/" "SKSE/" "TT_RelationsFinder.esp"
+          printf -- "  - %s\n" "scripts/" "SKSE/"
           echo "Excluding:"
           printf -- "  - %s\n" ".github/*"
           echo "::endgroup::"
@@ -51,10 +51,8 @@ jobs:
           echo "::group::Create ZIP"
           echo "Creating zip at: ${ZIP_PATH}"
           zip -r "$ZIP_PATH" \
-            docs/ \
             scripts/ \
             SKSE/ \
-            TT_RelationsFinder.esp \
             -x ".github/*"
           echo "::endgroup::"
 
