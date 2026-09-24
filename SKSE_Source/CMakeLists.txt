@@ -14,25 +14,43 @@ project(RelationsFinder VERSION 0.0.1 LANGUAGES CXX)
 #
 # To do this automatically, set the `SKYRIM_FOLDER` environment variable
 # to the path of your Skyrim Special Edition folder
-set(MOD_FOLDER_NAME "TT Relations Finder")
-# set(SKYRIM_MODS_FOLDER "C:\\path\\to\\your\\mods\\folder")
+set(MOD_FOLDER_NAME "TT Relations Finder Dev")
+set(SKYRIM_MODS_FOLDER "E:\\Skyrim\\development\\mods")
+set(OUTPUT_FOLDER "${SKYRIM_MODS_FOLDER}/${MOD_FOLDER_NAME}")
 
-# If you're using Mod Organizer 2 or Vortex, you might want this to go inside
-# of your "mods" folder, inside of a subfolder named "<your mod>".
-#
-# To do this automatically, set the `SKYRIM_MODS_FOLDER` environment variable
-# to the path of your "mods" folder
-if(DEFINED ENV{SKYRIM_MODS_FOLDER} AND IS_DIRECTORY "$ENV{SKYRIM_MODS_FOLDER}")
-    set(OUTPUT_FOLDER "$ENV{SKYRIM_MODS_FOLDER}/${MOD_FOLDER_NAME}")
-elseif(DEFINED SKYRIM_MODS_FOLDER AND IS_DIRECTORY "${SKYRIM_MODS_FOLDER}")
-    set(OUTPUT_FOLDER "${SKYRIM_MODS_FOLDER}/${MOD_FOLDER_NAME}")
+# ---------------------------------------------------- #
+#                     CommonLib                        #
+# ---------------------------------------------------- #
+
+if(NOT DEFINED ENV{COMMONLIB_SSE_FOLDER})
+    message(FATAL_ERROR "Missing COMMONLIB_SSE_FOLDER environment variable")
 endif()
 
-# Setup your SKSE plugin as an SKSE plugin!
-find_package(CommonLibSSE CONFIG REQUIRED)
+set(CommonLibPath "$ENV{COMMONLIB_SSE_FOLDER}")
+set(CommonLibName "CommonLibSSE")
+
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+# Force static linking for all vcpkg dependencies
+set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+
+add_subdirectory("${CommonLibPath}" ${CMAKE_CURRENT_BINARY_DIR}/_deps/clib-build EXCLUDE_FROM_ALL)
+get_target_property(COMMONLIB_SRC_DIR CommonLibSSE SOURCE_DIR)
+
+find_path(RAPIDCSV_INCLUDE_DIRS
+    NAMES rapidcsv.h
+    PATH_SUFFIXES rapidcsv
+    REQUIRED
+)
+
+include("${COMMONLIB_SRC_DIR}/cmake/CommonLibSSE.cmake")
 
 # Otherwise, you can set OUTPUT_FOLDER to any place you'd like :)
 # set(OUTPUT_FOLDER "C:/path/to/any/folder")
+
+# Setup your SKSE plugin as an SKSE plugin!
+# find_package(CommonLibSSE CONFIG REQUIRED)
 
 # Collect all source files
 file(GLOB_RECURSE SOURCES
@@ -41,16 +59,40 @@ file(GLOB_RECURSE SOURCES
     "version.rc"
 )
 
-# Setup your SKSE plugin as an SKSE plugin!
-find_package(CommonLibSSE CONFIG REQUIRED)
+# add_library(${PROJECT_NAME} SHARED ${SOURCES})
 add_commonlibsse_plugin(${PROJECT_NAME} SOURCES ${SOURCES})
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23) # <--- use C++23 standard
-# Ensure project root and src/ are on the include path so files can include headers by name
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src)
 target_precompile_headers(${PROJECT_NAME} PRIVATE PCH.h) # <--- PCH.h is required!
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+    ${CommonLibName}::${CommonLibName}
+)
+
+# Add include directories
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 # Silence Microsoft STL deprecation warnings
 target_compile_definitions(${PROJECT_NAME} PRIVATE _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING)
+
+# Force static linking of runtime library to reduce dependencies
+if(MSVC)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+    # Also ensure CommonLibSSE uses static runtime
+    if(TARGET ${CommonLibName})
+        set_property(TARGET ${CommonLibName} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
+
+    # Additional linker flags to embed dependencies
+    target_link_options(${PROJECT_NAME} PRIVATE
+        /INCREMENTAL:NO
+        /OPT:REF
+        /OPT:ICF
+    )
+endif()
 
 # When your SKSE .dll is compiled, this will automatically copy the .dll into your mods folder.
 # Only works if you configure DEPLOY_ROOT above (or set the SKYRIM_MODS_FOLDER environment variable)

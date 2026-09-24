@@ -1,7 +1,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
-#include "ActorMapService.h"
+#include "src/ActorMapService.h"
 #include "PCH.h"
 #include "src/PapyrusRelations.h"
 #include "src/RelationsFinderAPI.h"
@@ -86,6 +86,18 @@ namespace {
         GetNpcRelationshipsCallbackWrapper  // NEW safe API
     };
 
+    // Event sink that incrementally updates the actor map whenever a cell finishes loading
+    struct CellLoadSink : RE::BSTEventSink<RE::TESCellFullyLoadedEvent> {
+        RE::BSEventNotifyControl ProcessEvent(const RE::TESCellFullyLoadedEvent* a_event,
+                                              RE::BSTEventSource<RE::TESCellFullyLoadedEvent>*) override {
+            if (a_event) {
+                ActorMapService::UpdateMapFromHighActors();
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+    static CellLoadSink g_cellLoadSink;
+
     // Store messaging interface for later use
     const SKSE::MessagingInterface* g_messaging = nullptr;
 }
@@ -94,6 +106,37 @@ namespace {
 extern "C" __declspec(dllexport) const RelationsFinderAPI::APIInterface* RequestRelationsFinderAPI() {
     SKSE::log::info("RequestRelationsFinderAPI called by another plugin");
     return &g_apiInterface;
+}
+
+// Flat C exports — resolved via GetProcAddress using RelationsFinderPublicAPI.h
+
+extern "C" __declspec(dllexport) int RF_GetVersion() {
+    return static_cast<int>(RelationsFinderAPI::kAPIVersion);
+}
+
+extern "C" __declspec(dllexport) void RF_GetNpcRelationships(
+    RE::Actor* npc,
+    const char* associationType,
+    const char* hierarchy,
+    std::int32_t minRelationshipRank,
+    std::int32_t exactRelationshipRank,
+    RelationsFinderAPI::RelationshipCallbackFn callback,
+    void* userData) noexcept {
+    GetNpcRelationshipsCallbackWrapper(npc, associationType, hierarchy, minRelationshipRank, exactRelationshipRank,
+                                       callback, userData);
+}
+
+extern "C" __declspec(dllexport) void RF_GetNpcRelationshipNames(
+    RE::Actor* npc,
+    const char* associationType,
+    const char* hierarchy,
+    std::int32_t minRelationshipRank,
+    std::int32_t exactRelationshipRank,
+    RelationsFinderAPI::RelationshipNameCallbackFn callback,
+    void* userData) noexcept {
+    // Resolves names directly from TESNPC base forms — no live actor lookup required.
+    PapyrusRelations::GetNpcRelationshipNames(npc, associationType, hierarchy, minRelationshipRank,
+                                              exactRelationshipRank, callback, userData);
 }
 
 SKSEPluginLoad(const LoadInterface* skse) {
@@ -134,6 +177,13 @@ SKSEPluginLoad(const LoadInterface* skse) {
                             console->Print("RelationsFinder: Ready");
                         }
                         // Note: Papyrus functions already registered during plugin load
+                        // Register cell load event sink for incremental actor map updates
+                        if (auto* holder = RE::ScriptEventSourceHolder::GetSingleton()) {
+                            holder->GetEventSource<RE::TESCellFullyLoadedEvent>()->AddEventSink(&g_cellLoadSink);
+                            SKSE::log::info("Registered cell load event sink for actor map updates.");
+                        } else {
+                            SKSE::log::warn("ScriptEventSourceHolder unavailable; cell load sink not registered.");
+                        }
                         break;
 
                     case RelationsFinderAPI::kMessageType_Query:

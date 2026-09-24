@@ -18,6 +18,9 @@ namespace RelationsFinderAPI {
     // Callback function type for receiving results (SAFE across DLLs)
     using RelationshipCallbackFn = void (*)(RE::Actor* actor, void* userData);
 
+    // Callback function type for receiving actor names only (SAFE across DLLs)
+    using RelationshipNameCallbackFn = void (*)(const char* name, void* userData);
+
     // New safe API function that uses callbacks instead of returning vectors
     using GetNpcRelationshipsCallbackFn = void (*)(RE::Actor* npc, const char* associationType, const char* hierarchy,
                                                    std::int32_t minRelationshipRank, std::int32_t exactRelationshipRank,

@@ -5,6 +5,7 @@ meta.ini
 *.7z
 SkyrimSE.code-workspace
 *.ppj
+.claude/
 
 build/
 SKSE_Source/build/

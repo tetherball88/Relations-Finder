@@ -90,6 +90,76 @@ namespace PapyrusRelations {
             const int levelVal = static_cast<int>(rel->level.underlying());
             return 4 - levelVal;
         }
+
+        struct IterateStats {
+            std::size_t total = 0;
+            std::size_t filteredByAssoc = 0;
+            std::size_t filteredByHierarchy = 0;
+            std::size_t filteredByRank = 0;
+        };
+
+        // Shared loop: walks all relationships on npcBase, applies all filters,
+        // and calls visitor(otherBase) for each match. Returns filter counters for logging.
+        template <typename Visitor>
+        static IterateStats ForEachMatchingBase(const RE::TESNPC* npcBase, std::string_view assocFilter,
+                                                std::string_view hierarchyFilter, std::int32_t minRelationshipRank,
+                                                std::int32_t exactRelationshipRank, Visitor&& visitor) {
+            IterateStats stats;
+            const auto* relArray = npcBase->relationships;
+            if (!relArray) {
+                return stats;
+            }
+
+            for (const auto* rel : *relArray) {
+                if (!rel) {
+                    continue;
+                }
+
+                ++stats.total;
+
+                RE::TESNPC* otherBase = nullptr;
+                bool otherIsPrimary = false;
+
+                if (rel->npc1 == npcBase) {
+                    otherBase = rel->npc2;
+                    otherIsPrimary = false;
+                } else if (rel->npc2 == npcBase) {
+                    otherBase = rel->npc1;
+                    otherIsPrimary = true;
+                } else {
+                    continue;
+                }
+
+                if (!otherBase) {
+                    continue;
+                }
+
+                if (!MatchesAssociationType(rel, assocFilter)) {
+                    ++stats.filteredByAssoc;
+                    continue;
+                }
+
+                if (!MatchesHierarchy(otherIsPrimary, hierarchyFilter)) {
+                    ++stats.filteredByHierarchy;
+                    continue;
+                }
+
+                const int rank = CalculateRelationshipRank(rel);
+                if (exactRelationshipRank != kUnsetRelationshipRank) {
+                    if (rank != exactRelationshipRank) {
+                        ++stats.filteredByRank;
+                        continue;
+                    }
+                } else if (rank < minRelationshipRank) {
+                    ++stats.filteredByRank;
+                    continue;
+                }
+
+                visitor(otherBase);
+            }
+
+            return stats;
+        }
     }
 
     std::vector<RE::Actor*> GetNpcRelationships(RE::StaticFunctionTag*, RE::Actor* npc,
@@ -126,78 +196,18 @@ namespace PapyrusRelations {
             minRelationshipRank, exactRelationshipRank);
 
         std::vector<RE::Actor*> results;
-        std::size_t totalRels = 0;
-        std::size_t filteredByAssoc = 0;
-        std::size_t filteredByHierarchy = 0;
-        std::size_t filteredByRank = 0;
         std::size_t actorNotFound = 0;
 
-        const auto* relArray = npcBase->relationships;
-        if (!relArray) {
-            return results;
-        }
-
-        // Don't pre-allocate - most relationships get filtered out
-        results.reserve(std::min<std::size_t>(relArray->size(), 32));
-
-        for (const auto* rel : *relArray) {
-            if (!rel) {
-                continue;
-            }
-
-            ++totalRels;
-
-            // Determine the 'other' base relative to npcBase
-            RE::TESNPC* otherBase = nullptr;
-            bool otherIsPrimary = false;  // primary == member index 0 (npc1)
-
-            if (rel->npc1 == npcBase) {
-                otherBase = rel->npc2;
-                otherIsPrimary = false;  // other is secondary
-            } else if (rel->npc2 == npcBase) {
-                otherBase = rel->npc1;
-                otherIsPrimary = true;  // other is primary
-            } else {
-                // Relationship doesn't involve this base
-                continue;
-            }
-
-            if (!otherBase) {
-                continue;
-            }
-
-            // Apply filters
-            if (!MatchesAssociationType(rel, assocFilter)) {
-                ++filteredByAssoc;
-                continue;
-            }
-
-            if (!MatchesHierarchy(otherIsPrimary, hierarchyFilter)) {
-                ++filteredByHierarchy;
-                continue;
-            }
-
-            const int relationshipRank = CalculateRelationshipRank(rel);
-
-            // exactRelationshipRank takes priority if provided (non-default value)
-            if (exactRelationshipRank != kUnsetRelationshipRank) {
-                if (relationshipRank != exactRelationshipRank) {
-                    ++filteredByRank;
-                    continue;
+        const auto stats = ForEachMatchingBase(
+            npcBase, assocFilter, hierarchyFilter, minRelationshipRank, exactRelationshipRank,
+            [&](RE::TESNPC* otherBase) {
+                if (auto* actor = ActorMapService::GetActorByBase(otherBase)) {
+                    results.push_back(actor);
+                } else {
+                    ++actorNotFound;
+                    SKSE::log::debug("Could not find live actor for base FormID {:08X}", otherBase->GetFormID());
                 }
-            } else if (relationshipRank < minRelationshipRank) {
-                ++filteredByRank;
-                continue;
-            }
-
-            // Get live actor for other base
-            if (auto* actor = ActorMapService::GetActorByBase(otherBase)) {
-                results.push_back(actor);
-            } else {
-                ++actorNotFound;
-                SKSE::log::debug("Could not find live actor for base FormID {:08X}", otherBase->GetFormID());
-            }
-        }
+            });
 
         const auto endTime = std::chrono::steady_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
@@ -206,7 +216,8 @@ namespace PapyrusRelations {
         SKSE::log::info(
             "GetNpcRelationships results: {} matches from {} total relationships "
             "(filtered: {} by assoc, {} by hierarchy, {} by rank, {} actor not found) - took {:.3f} ms",
-            results.size(), totalRels, filteredByAssoc, filteredByHierarchy, filteredByRank, actorNotFound, ms);
+            results.size(), stats.total, stats.filteredByAssoc, stats.filteredByHierarchy, stats.filteredByRank,
+            actorNotFound, ms);
 
         return results;
     }
@@ -233,6 +244,53 @@ namespace PapyrusRelations {
                                                 std::int32_t exactRelationshipRank) {
         return GetNpcRelationships(tag, npc, RE::BSFixedString(associationType), RE::BSFixedString(hierarchy),
                                    minRelationshipRank, exactRelationshipRank);
+    }
+
+    void GetNpcRelationshipNames(RE::Actor* npc, const char* associationType, const char* hierarchy,
+                                 std::int32_t minRelationshipRank, std::int32_t exactRelationshipRank,
+                                 void (*callback)(const char* name, void* userData), void* userData) noexcept {
+        if (!callback) {
+            return;
+        }
+
+        if (!npc) {
+            SKSE::log::warn("GetNpcRelationshipNames: npc is null");
+            return;
+        }
+
+        const auto* base = npc->GetActorBase();
+        if (!base) {
+            SKSE::log::warn("GetNpcRelationshipNames: actor has no base form");
+            return;
+        }
+
+        const auto* npcBase = base->As<RE::TESNPC>();
+        if (!npcBase) {
+            SKSE::log::warn("GetNpcRelationshipNames: actor base is not a TESNPC");
+            return;
+        }
+
+        const std::string_view assocFilter{associationType ? associationType : ""};
+        const std::string_view hierarchyFilter{hierarchy ? hierarchy : ""};
+
+        std::size_t matched = 0;
+
+        const auto stats = ForEachMatchingBase(
+            npcBase, assocFilter, hierarchyFilter, minRelationshipRank, exactRelationshipRank,
+            [&](RE::TESNPC* otherBase) {
+                // Name comes from the TESNPC base form — always available, no live actor needed
+                const char* name = otherBase->GetName();
+                if (name && *name) {
+                    callback(name, userData);
+                    ++matched;
+                } else {
+                    SKSE::log::debug("GetNpcRelationshipNames: base FormID {:08X} has no name",
+                                     otherBase->GetFormID());
+                }
+            });
+
+        SKSE::log::info("GetNpcRelationshipNames: {} matches from {} relationships for '{}'", matched, stats.total,
+                        npc->GetName());
     }
 
 }  // namespace PapyrusRelations

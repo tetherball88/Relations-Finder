@@ -16,4 +16,10 @@ namespace PapyrusRelations {
                                                 const char* hierarchy, std::int32_t minRelationshipRank,
                                                 std::int32_t exactRelationshipRank);
 
+    // Returns names sourced directly from TESNPC base forms (no live actor required).
+    // Safe to call even when actors are not loaded in the current cell.
+    void GetNpcRelationshipNames(RE::Actor* npc, const char* associationType, const char* hierarchy,
+                                 std::int32_t minRelationshipRank, std::int32_t exactRelationshipRank,
+                                 void (*callback)(const char* name, void* userData), void* userData) noexcept;
+
 }  // namespace PapyrusRelations

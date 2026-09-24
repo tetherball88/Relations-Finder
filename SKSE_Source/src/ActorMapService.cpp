@@ -105,6 +105,65 @@ namespace ActorMapService {
         }
     }
 
+    void UpdateMapFromHighActors() {
+        const auto* pl = RE::ProcessLists::GetSingleton();
+        if (!pl) {
+            return;
+        }
+
+        std::unique_lock lock(g_baseToActorMutex);
+
+        // Prune stale handles — actors that have since unloaded
+        for (auto it = g_baseToActor.begin(); it != g_baseToActor.end();) {
+            if (!it->second.get()) {
+                it = g_baseToActor.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Scan high and middle-high lists for newly loaded actors
+        const RE::BSTArray<RE::ActorHandle>* lists[] = {&pl->highActorHandles, &pl->middleHighActorHandles};
+        std::size_t addedCount = 0;
+
+        for (const auto* actorHandles : lists) {
+            for (const auto& actorHandle : *actorHandles) {
+                const auto actorPtr = actorHandle.get();
+                if (!actorPtr) {
+                    continue;
+                }
+
+                auto* actor = actorPtr.get();
+                if (!actor) {
+                    continue;
+                }
+
+                auto* base = actor->GetActorBase();
+                if (!base) {
+                    continue;
+                }
+
+                auto* npc = base->As<RE::TESNPC>();
+                if (!npc) {
+                    continue;
+                }
+
+                if (!HasRelationships(npc)) {
+                    continue;
+                }
+
+                // try_emplace only inserts when the key is absent; safe for unique NPCs
+                if (g_baseToActor.try_emplace(npc, actorHandle).second) {
+                    ++addedCount;
+                }
+            }
+        }
+
+        if (addedCount > 0) {
+            SKSE::log::info("UpdateMapFromHighActors: added {} new actor(s) with relationships", addedCount);
+        }
+    }
+
     RE::Actor* GetActorByBase(RE::TESNPC* base) noexcept {
         if (!base) {
             return nullptr;
